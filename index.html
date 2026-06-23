@@ -28,7 +28,51 @@
   <div id="root"></div>
 
   <script type="text/babel">
-    const { useState, useEffect, useRef } = React;
+    // ★★★ 超・緊急回避システム（Reactの前に作動） ★★★
+    if (window.location.search.includes('reset=1')) {
+      localStorage.clear();
+      alert('【成功】過去の壊れたデータを完全に消去しました！');
+      window.history.replaceState(null, '', window.location.pathname);
+    }
+
+    const { useState, useEffect, useRef, Component } = React;
+
+    // ★★★ エラーバウンダリ（絶対に画面を真っ白にさせない安全装置） ★★★
+    class ErrorBoundary extends Component {
+      constructor(props) {
+        super(props);
+        this.state = { hasError: false, errorMsg: '' };
+      }
+      static getDerivedStateFromError(error) {
+        return { hasError: true, errorMsg: error.toString() };
+      }
+      componentDidCatch(error, errorInfo) {
+        console.error("ErrorBoundary caught an error:", error, errorInfo);
+      }
+      render() {
+        if (this.state.hasError) {
+          return (
+            <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 text-center">
+              <div className="w-16 h-16 bg-red-100 text-red-500 rounded-full flex items-center justify-center mb-4">
+                <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+              </div>
+              <h1 className="text-xl font-bold text-slate-800 mb-2">システムエラーが発生しました</h1>
+              <p className="text-sm text-slate-500 mb-6">壊れたデータが読み込まれたため、画面を保護しました。</p>
+              <div className="bg-red-50 border border-red-100 text-red-600 text-xs p-3 rounded-lg w-full mb-8 text-left overflow-auto max-h-32">
+                {this.state.errorMsg}
+              </div>
+              <button 
+                onClick={() => { localStorage.clear(); window.location.reload(); }}
+                className="w-full bg-slate-900 text-white py-4 rounded-xl font-bold shadow-lg active:scale-95 transition-transform"
+              >
+                データを強制リセットして再起動
+              </button>
+            </div>
+          );
+        }
+        return this.props.children;
+      }
+    }
 
     const SafeIcon = ({ name, className }) => {
       const svgProps = {
@@ -51,7 +95,8 @@
         Plus: <><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></>,
         Trash2: <><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></>,
         ChevronLeft: <><polyline points="15 18 9 12 15 6"></polyline></>,
-        ChevronRight: <><polyline points="9 18 15 12 9 6"></polyline></>
+        ChevronRight: <><polyline points="9 18 15 12 9 6"></polyline></>,
+        CalendarPlus: <><path d="M21 13V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h8"></path><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line><line x1="19" y1="16" x2="19" y2="22"></line><line x1="16" y1="19" x2="22" y2="19"></line></>
       };
       return <svg {...svgProps}>{icons[name] || icons.Info}</svg>;
     };
@@ -68,17 +113,7 @@
       const [uploadErrorMsg, setUploadErrorMsg] = useState('');
       const fileInputRef = useRef(null);
 
-      // ★ 最強のバリア：起動時のデータ検証と強制リセット機能 ★
       useEffect(() => {
-        // もしURLに ?reset=1 が付いていたら、問答無用でデータを完全消去してリフレッシュする
-        if (window.location.search.includes('reset=1')) {
-          localStorage.removeItem('shiftlink_shifts');
-          localStorage.removeItem('shiftlink_name');
-          // URLから ?reset=1 を消して綺麗な状態に戻す
-          window.history.replaceState(null, '', window.location.pathname);
-          alert('古いデータを完全にリセットしました！');
-        }
-
         const savedName = localStorage.getItem('shiftlink_name');
         if (savedName) setMyName(savedName);
 
@@ -91,10 +126,8 @@
           try {
             const parsed = JSON.parse(savedShifts);
             
-            // ★ バリア1：データが「2026/05/15」のように正しい形式になっているか超厳密にチェック
             const validShifts = parsed.filter(s => {
               if (!s || !s.name || !s.cleanName || !s.date) return false;
-              // 正規表現で正しい日付の形をしているかだけを通す（ゴミデータを弾く）
               if (!/^\d{4}\/\d{2}\/\d{2}$/.test(s.date)) return false;
               return true;
             });
@@ -122,7 +155,7 @@
                   if(firstDate) setSelectedDate(firstDate);
               }
             } else {
-                localStorage.removeItem('shiftlink_shifts'); // 使えないデータは消去
+                localStorage.removeItem('shiftlink_shifts');
             }
           } catch (e) {
               console.error("記憶されたデータの読み込みに失敗しました", e);
@@ -273,13 +306,11 @@
         const year = parseInt(yearStr, 10);
         const month = parseInt(monthStr, 10);
         
-        // ★ バリア2：計算できない異常な月データが来ても、絶対にクラッシュさせない
         if (isNaN(year) || isNaN(month)) return null;
 
         const firstDay = new Date(year, month - 1, 1).getDay();
         const lastDate = new Date(year, month, 0).getDate();
         
-        // バリア3: カレンダーの枠組みがおかしくなるのを防ぐ
         if (isNaN(firstDay) || firstDay < 0 || firstDay > 6) return null;
 
         const daysArray = Array(firstDay).fill(null);
@@ -368,7 +399,7 @@
           <main className="px-5 py-6 pb-24 overflow-y-auto max-h-[calc(100vh-80px)] scrollbar-hide">
             {!hasData ? (
               <div className="bg-white p-8 rounded-3xl shadow-sm border border-slate-100 flex flex-col items-center text-center mt-4">
-                <div className="w-20 h-20 bg-blue-50 rounded-full flex items-center justify-center mb-5"><SafeIcon name="Calendar" className="text-blue-600 w-10 h-10" /></div>
+                <div className="w-20 h-20 bg-blue-50 rounded-full flex items-center justify-center mb-5"><SafeIcon name="CalendarPlus" className="text-blue-600 w-10 h-10" /></div>
                 <h2 className="text-xl font-bold text-slate-800 mb-2">シフトを読み込む</h2>
                 <p className="text-sm text-slate-500 mb-8 leading-relaxed">まずはシフト表（CSV形式）を<br/>追加してください。</p>
                 <button onClick={() => setShowUploadModal(true)} className="w-full bg-slate-900 text-white py-4 rounded-2xl font-bold shadow-lg"><SafeIcon name="Plus" className="w-5 h-5" /> シフトを追加</button>
@@ -413,7 +444,11 @@
     };
 
     const root = ReactDOM.createRoot(document.getElementById('root'));
-    root.render(<App />);
+    root.render(
+      <ErrorBoundary>
+        <App />
+      </ErrorBoundary>
+    );
   </script>
 </body>
 </html>
