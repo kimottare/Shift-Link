@@ -68,8 +68,17 @@
       const [uploadErrorMsg, setUploadErrorMsg] = useState('');
       const fileInputRef = useRef(null);
 
-      // ★ 初期化時にlocalStorageのデータを検証・クリーンアップする
+      // ★ 最強のバリア：起動時のデータ検証と強制リセット機能 ★
       useEffect(() => {
+        // もしURLに ?reset=1 が付いていたら、問答無用でデータを完全消去してリフレッシュする
+        if (window.location.search.includes('reset=1')) {
+          localStorage.removeItem('shiftlink_shifts');
+          localStorage.removeItem('shiftlink_name');
+          // URLから ?reset=1 を消して綺麗な状態に戻す
+          window.history.replaceState(null, '', window.location.pathname);
+          alert('古いデータを完全にリセットしました！');
+        }
+
         const savedName = localStorage.getItem('shiftlink_name');
         if (savedName) setMyName(savedName);
 
@@ -81,8 +90,14 @@
         if (savedShifts) {
           try {
             const parsed = JSON.parse(savedShifts);
-            // 万が一、名前がないゴミデータが保存されていたらフィルタリングして修復
-            const validShifts = parsed.filter(s => s && s.name && s.cleanName && s.date);
+            
+            // ★ バリア1：データが「2026/05/15」のように正しい形式になっているか超厳密にチェック
+            const validShifts = parsed.filter(s => {
+              if (!s || !s.name || !s.cleanName || !s.date) return false;
+              // 正規表現で正しい日付の形をしているかだけを通す（ゴミデータを弾く）
+              if (!/^\d{4}\/\d{2}\/\d{2}$/.test(s.date)) return false;
+              return true;
+            });
             
             if (validShifts.length > 0) {
               setShifts(validShifts);
@@ -94,7 +109,6 @@
               if (uniqueMonths.includes(currentYM)) {
                   setDisplayMonth(currentYM);
                   const todayStrFull = `${currentYM.replace('-', '/')}/${String(today.getDate()).padStart(2, '0')}`;
-                  // 今日があれば今日を、なければその月の1日目を選択
                   if(validShifts.some(s => s.date === todayStrFull)) {
                       setSelectedDate(todayStrFull);
                   } else {
@@ -108,8 +122,7 @@
                   if(firstDate) setSelectedDate(firstDate);
               }
             } else {
-                // 有効なデータがなければ初期化
-                localStorage.removeItem('shiftlink_shifts');
+                localStorage.removeItem('shiftlink_shifts'); // 使えないデータは消去
             }
           } catch (e) {
               console.error("記憶されたデータの読み込みに失敗しました", e);
@@ -182,7 +195,6 @@
           if (cols.length < 2) continue; 
           
           const rowName = cleanStr(cols[0]);
-          // ★超重要：名前の列が空っぽ（,,0,0,0...）の場合は完全にスキップする
           if (!rowName || rowName === '') continue;
           
           const cleanRowName = rowName.replace(/[\s　]/g, '');
@@ -220,7 +232,6 @@
       
       const restShiftKeywords = ['休', '法定', '所定', 'P', '0'];
       const workingMembers = todaysShifts.filter(s => {
-        // ★ 万が一、名前がないデータが混ざっていても表示しないように防ぐ
         if (!s.name || s.name === '') return false;
         if (s.cleanName === cleanTargetName) return false; 
         if (restShiftKeywords.includes(s.shift)) return false; 
@@ -261,8 +272,16 @@
         const [yearStr, monthStr] = displayMonth.split('-');
         const year = parseInt(yearStr, 10);
         const month = parseInt(monthStr, 10);
+        
+        // ★ バリア2：計算できない異常な月データが来ても、絶対にクラッシュさせない
+        if (isNaN(year) || isNaN(month)) return null;
+
         const firstDay = new Date(year, month - 1, 1).getDay();
         const lastDate = new Date(year, month, 0).getDate();
+        
+        // バリア3: カレンダーの枠組みがおかしくなるのを防ぐ
+        if (isNaN(firstDay) || firstDay < 0 || firstDay > 6) return null;
+
         const daysArray = Array(firstDay).fill(null);
         for (let i = 1; i <= lastDate; i++) daysArray.push(i);
         const myShiftsMap = {};
