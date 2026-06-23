@@ -9,7 +9,6 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="ShiftLink">
   
-  <!-- iPhoneホーム画面用アイコン (カレンダーデザイン) -->
   <link rel="apple-touch-icon" href="https://img.icons8.com/fluency/240/calendar--v1.png">
   
   <script src="https://cdn.tailwindcss.com"></script>
@@ -31,7 +30,6 @@
   <script type="text/babel">
     const { useState, useEffect, useRef } = React;
 
-    // 自作SVGアイコン（外部ライブラリの衝突回避）
     const SafeIcon = ({ name, className }) => {
       const svgProps = {
         xmlns: "http://www.w3.org/2000/svg", width: "24", height: "24", viewBox: "0 0 24 24",
@@ -70,21 +68,25 @@
       const [uploadErrorMsg, setUploadErrorMsg] = useState('');
       const fileInputRef = useRef(null);
 
+      // ★ 初期化時にlocalStorageのデータを検証・クリーンアップする
       useEffect(() => {
         const savedName = localStorage.getItem('shiftlink_name');
-        const savedShifts = localStorage.getItem('shiftlink_shifts');
         if (savedName) setMyName(savedName);
 
         const today = new Date();
         const currentYM = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
         setUploadMonth(currentYM);
 
+        const savedShifts = localStorage.getItem('shiftlink_shifts');
         if (savedShifts) {
           try {
             const parsed = JSON.parse(savedShifts);
-            if (parsed && parsed.length > 0) {
-              setShifts(parsed);
-              const uniqueMonths = Array.from(new Set(parsed.map(s => {
+            // 万が一、名前がないゴミデータが保存されていたらフィルタリングして修復
+            const validShifts = parsed.filter(s => s && s.name && s.cleanName && s.date);
+            
+            if (validShifts.length > 0) {
+              setShifts(validShifts);
+              const uniqueMonths = Array.from(new Set(validShifts.map(s => {
                   const parts = s.date.split('/');
                   return `${parts[0]}-${parts[1]}`;
               }))).sort();
@@ -92,15 +94,27 @@
               if (uniqueMonths.includes(currentYM)) {
                   setDisplayMonth(currentYM);
                   const todayStrFull = `${currentYM.replace('-', '/')}/${String(today.getDate()).padStart(2, '0')}`;
-                  setSelectedDate(todayStrFull);
+                  // 今日があれば今日を、なければその月の1日目を選択
+                  if(validShifts.some(s => s.date === todayStrFull)) {
+                      setSelectedDate(todayStrFull);
+                  } else {
+                      const firstDate = validShifts.find(s => s.date.startsWith(currentYM.replace('-', '/')))?.date;
+                      if(firstDate) setSelectedDate(firstDate);
+                  }
               } else {
                   const latestMonth = uniqueMonths[uniqueMonths.length - 1];
                   setDisplayMonth(latestMonth);
-                  const firstDate = parsed.find(s => s.date.startsWith(latestMonth.replace('-', '/')))?.date;
+                  const firstDate = validShifts.find(s => s.date.startsWith(latestMonth.replace('-', '/')))?.date;
                   if(firstDate) setSelectedDate(firstDate);
               }
+            } else {
+                // 有効なデータがなければ初期化
+                localStorage.removeItem('shiftlink_shifts');
             }
-          } catch (e) { console.error(e); }
+          } catch (e) {
+              console.error("記憶されたデータの読み込みに失敗しました", e);
+              localStorage.removeItem('shiftlink_shifts');
+          }
         }
       }, []);
 
@@ -162,23 +176,29 @@
         let nameFound = false;
         const year = parseInt(ym.split('-')[0], 10);
         const month = parseInt(ym.split('-')[1], 10);
-        const getDayOfWeek = (y, m, d) => ['日', '月', '火', '水', '木', '金', '土'][new Date(y, m - 1, d).getDay()];
 
         for (let i = 1; i < lines.length; i++) {
           const cols = lines[i].split(',');
           if (cols.length < 2) continue; 
+          
           const rowName = cleanStr(cols[0]);
-          if (!rowName) continue;
+          // ★超重要：名前の列が空っぽ（,,0,0,0...）の場合は完全にスキップする
+          if (!rowName || rowName === '') continue;
+          
           const cleanRowName = rowName.replace(/[\s　]/g, '');
           if (cleanRowName === cleanTarget) nameFound = true;
+          
           for (let c = 1; c < headers.length; c++) {
             const dayStr = headers[c];
             let shiftVal = cleanStr(cols[c]);
-            if (dayStr && !isNaN(dayStr)) {
+            
+            const dayNum = parseInt(dayStr, 10);
+            if (!isNaN(dayNum) && dayNum >= 1 && dayNum <= 31) {
               if (shiftVal === '' || shiftVal === undefined) continue;
+              if (shiftVal.includes('#REF!')) continue;
               if (shiftVal === '-') shiftVal = '休';
-              const day = parseInt(dayStr, 10);
-              const dateStr = `${year}/${String(month).padStart(2, '0')}/${String(day).padStart(2, '0')}`;
+              
+              const dateStr = `${year}/${String(month).padStart(2, '0')}/${String(dayNum).padStart(2, '0')}`;
               results.push({ date: dateStr, name: rowName, cleanName: cleanRowName, shift: shiftVal });
             }
           }
@@ -200,6 +220,8 @@
       
       const restShiftKeywords = ['休', '法定', '所定', 'P', '0'];
       const workingMembers = todaysShifts.filter(s => {
+        // ★ 万が一、名前がないデータが混ざっていても表示しないように防ぐ
+        if (!s.name || s.name === '') return false;
         if (s.cleanName === cleanTargetName) return false; 
         if (restShiftKeywords.includes(s.shift)) return false; 
         return true;
